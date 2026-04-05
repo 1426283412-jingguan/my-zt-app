@@ -4,153 +4,173 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy import stats
 
-# 网页基本配置
-st.set_page_config(page_title="高级正态分布分析系统", layout="wide")
+# 1. 网页基础美化配置
+st.set_page_config(
+    page_title="ZT Pro 数据分析工作站",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("📊 高级正态分布与数据分析工作站")
-st.markdown("上传数据，自定义组距与坐标范围，实时生成带占比标签的精准图表。")
+# 自定义 CSS 样式，让界面更整洁
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    div[data-testid="stExpander"] { border: none; box-shadow: none; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- 侧边栏：数据导入 ---
-st.sidebar.header("1. 数据导入")
-uploaded_file = st.sidebar.file_uploader("上传 Excel 或 CSV 文件", type=["csv", "xlsx"])
+st.title("📊 ZT Pro 数据正态分析工作站")
+st.caption("专业的混合数据清洗、交互式绘图与深度统计推断工具")
 
-if uploaded_file:
-    # 根据文件后缀读取数据
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
-
-    # 获取数字列
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+# --- 侧边栏：模块化配置 ---
+with st.sidebar:
+    st.header("⚙️ 控制面板")
     
-    if numeric_cols:
-        column_name = st.sidebar.selectbox("选择要分析的数字列", numeric_cols)
-
-        if column_name:
-            # 提取数据并剔除空值
-            data = df[column_name].dropna()
-
-            if len(data) > 0:
-                st.sidebar.markdown("---")
-                st.sidebar.header("2. 图表与统计参数设置")
-                
-                # 获取数据的极值，用于默认设置
-                data_min = float(data.min())
-                data_max = float(data.max())
-                
-                # 组距设置
-                default_bin_width = (data_max - data_min) / 10 if data_max != data_min else 1.0
-                bin_width = st.sidebar.number_input("设置横坐标组距 (Bin Width)", min_value=0.0001, value=default_bin_width, step=0.1)
-                
-                # 横坐标范围设置
-                col_min, col_max = st.sidebar.columns(2)
-                x_min = col_min.number_input("横坐标起始值 (下限)", value=data_min)
-                x_max = col_max.number_input("横坐标结束值 (上限)", value=data_max)
-                
-                # 置信区间设置
-                conf_level = st.sidebar.slider("置信区间水平 (%)", 90, 99, 95) / 100.0
-                
-                # ==========================================
-                # 数据统计与计算
-                # ==========================================
-                total_mean = data.mean()
-                total_var = data.var()
-                total_std = data.std()
-                n_total = len(data)
-                
-                # 计算置信区间 (基于 t 分布)
-                se = total_std / np.sqrt(n_total)
-                ci_lower, ci_upper = stats.t.interval(conf_level, df=n_total-1, loc=total_mean, scale=se)
-                
-                # 计算选定范围内的数据均值
-                filtered_data = data[(data >= x_min) & (data <= x_max)]
-                filtered_mean = filtered_data.mean() if len(filtered_data) > 0 else np.nan
-                
-                # ==========================================
-                # 绘图逻辑 (使用 Plotly Graph Objects)
-                # ==========================================
-                # 根据自定义的 min, max 和 bin_width 生成区间边界
-                # 为了确保最后一个区间被包含，上限加上一个 bin_width
-                bins = np.arange(x_min, x_max + bin_width, bin_width)
-                
-                # 统计每个区间内的数据量
-                counts, bin_edges = np.histogram(data, bins=bins)
-                
-                # 计算每个区间的占比
-                proportions = counts / n_total
-                percentages = proportions * 100
-                
-                # 计算柱状图的中心点坐标
-                bin_centers = bin_edges[:-1] + bin_width / 2
-                
-                fig = go.Figure()
-                
-                # 1. 绘制带有百分比标签的柱状图
-                fig.add_trace(go.Bar(
-                    x=bin_centers,
-                    y=proportions,
-                    width=bin_width * 0.95, # 柱子宽度稍微留缝隙，更美观
-                    text=[f'{p:.1f}%' if p > 0 else '' for p in percentages], # 柱子顶部显示占比
-                    textposition='outside',
-                    name='实际数据分组占比',
-                    marker_color='#636EFA'
-                ))
-                
-                # 2. 绘制平滑的正态分布理论曲线
-                x_curve = np.linspace(x_min, x_max, 500)
-                # 计算理论概率密度并乘以组距，使其面积与柱状图比例对齐
-                y_curve = stats.norm.pdf(x_curve, total_mean, total_std) * bin_width
-                
-                fig.add_trace(go.Scatter(
-                    x=x_curve,
-                    y=y_curve,
-                    mode='lines',
-                    name='理论正态分布曲线',
-                    line=dict(color='#EF553B', width=3)
-                ))
-                
-                # 优化图表布局
-                fig.update_layout(
-                    title=dict(text=f"<b>{column_name}</b> 的正态分布及占比分析图", font=dict(size=20)),
-                    xaxis_title="数值 (自定义横坐标范围)",
-                    yaxis_title="占比 (比例)",
-                    bargap=0.05,
-                    hovermode="x unified",
-                    legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
-                )
-                
-                # 在网页上展示图表
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # ==========================================
-                # 展示核心统计指标
-                # ==========================================
-                st.markdown("### 📈 核心统计指标分析")
-                
-                # 第一排数据：均值对比
-                c1, c2 = st.columns(2)
-                c1.metric("所有数据的平均值 (Total Mean)", f"{total_mean:.4f}")
-                if np.isnan(filtered_mean):
-                    c2.metric(f"选定横坐标范围 [{x_min}, {x_max}] 内的均值", "该范围内无数据")
-                else:
-                    c2.metric(f"选定横坐标范围 [{x_min}, {x_max}] 内的均值", f"{filtered_mean:.4f}")
-                
-                # 第二排数据：离散程度与可靠性
-                st.markdown("<br>", unsafe_allow_html=True) # 增加一些间距
-                c3, c4, c5 = st.columns(3)
-                c3.metric("方差 (Variance)", f"{total_var:.4f}")
-                c4.metric("标准差 (Std Deviation)", f"{total_std:.4f}")
-                c5.metric("有效数据量 (Count)", f"{n_total}")
-                
-                # 置信区间展示框
-                st.success(f"**💡 {int(conf_level*100)}% 置信区间 (Confidence Interval):** 真实均值有 {int(conf_level*100)}% 的概率落在 **[{ci_lower:.4f},  {ci_upper:.4f}]** 之间。")
-
+    # 数据上传模块
+    st.subheader("1. 导入数据")
+    uploaded_file = st.file_uploader("上传 Excel / CSV (支持混合文本列)", type=["csv", "xlsx"])
+    
+    if uploaded_file:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
             else:
-                st.warning("选中列中没有有效数字数据，请检查表格。")
+                df = pd.read_excel(uploaded_file)
+            st.success("✅ 文件加载成功")
+        except Exception as e:
+            st.error(f"❌ 读取错误: {e}")
+            st.stop()
+
+        # 列选择
+        all_cols = df.columns.tolist()
+        column_name = st.selectbox("🎯 选择分析目标列", all_cols)
+
+        st.markdown("---")
+        st.subheader("2. 分析参数")
+        
+        # 智能数据清洗
+        raw_series = df[column_name]
+        clean_data = pd.to_numeric(raw_series, errors='coerce').dropna()
+        n_count = len(clean_data)
+
+        if n_count > 1:
+            d_min, d_max = float(clean_data.min()), float(clean_data.max())
+            
+            # 参数交互
+            bin_width = st.number_input("📏 设置组距 (Bin Width)", min_value=0.0001, value=(d_max-d_min)/10 if d_max!=d_min else 1.0, step=0.1)
+            
+            x_min = st.number_input("📉 横轴起始值", value=d_min)
+            x_max = st.number_input("📈 横轴结束值", value=d_max)
+            
+            # 置信区间范围优化：60-100
+            conf_level = st.slider("⚖️ 置信区间水平 (%)", 60, 100, 95) / 100.0
+        else:
+            st.warning("⚠️ 该列有效数字不足")
+
+# --- 主界面内容 ---
+if uploaded_file and n_count > 1:
+    # 定义标签页，让界面整洁
+    tab1, tab2, tab3 = st.tabs(["📈 图形可视化", "📋 统计报告", "🔍 数据预览"])
+
+    # --- 计算统计量 ---
+    total_mean = clean_data.mean()
+    total_std = clean_data.std()
+    total_var = clean_data.var()
+    
+    # 范围过滤数据统计
+    range_data = clean_data[(clean_data >= x_min) & (clean_data <= x_max)]
+    range_mean = range_data.mean() if len(range_data) > 0 else np.nan
+    
+    # 置信区间计算 (处理 100% 的特殊情况)
+    if conf_level < 1.0:
+        ci_lower, ci_upper = stats.t.interval(conf_level, df=n_count-1, loc=total_mean, scale=total_std/np.sqrt(n_count))
     else:
-        st.error("表格中没有发现数字列，请确认上传了正确的数据格式。")
+        ci_lower, ci_upper = -np.inf, np.inf # 100% 理论上涵盖所有可能
+
+    with tab1:
+        # 绘图区域
+        bins = np.arange(x_min, x_max + bin_width, bin_width)
+        counts, bin_edges = np.histogram(clean_data, bins=bins)
+        proportions = counts / n_count
+        bin_centers = bin_edges[:-1] + bin_width / 2
+
+        fig = go.Figure()
+
+        # 柱状图：带占比标签
+        fig.add_trace(go.Bar(
+            x=bin_centers,
+            y=proportions,
+            width=bin_width * 0.9,
+            text=[f'{p*100:.1f}%' if p > 0 else '' for p in proportions],
+            textposition='outside',
+            name='区间频率占比',
+            marker=dict(color='rgb(55, 83, 109)', opacity=0.8)
+        ))
+
+        # 正态分布曲线
+        x_curve = np.linspace(x_min, x_max, 500)
+        y_curve = stats.norm.pdf(x_curve, total_mean, total_std) * bin_width
+        fig.add_trace(go.Scatter(
+            x=x_curve, y=y_curve, mode='lines', 
+            name='理论正态曲线',
+            line=dict(color='rgb(219, 64, 82)', width=3)
+        ))
+
+        fig.update_layout(
+            margin=dict(l=20, r=20, t=50, b=20),
+            xaxis_title=f"数值范围 ({column_name})",
+            yaxis_title="占比频率",
+            template="simple_white",
+            height=600,
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.subheader("📊 核心深度统计")
+        
+        # 使用 Metric 展示重要均值对比
+        c1, c2, c3 = st.columns(3)
+        c1.metric("所有数据均值", f"{total_mean:.4f}")
+        c2.metric(f"选定范围均值", f"{range_mean:.4f}" if not np.isnan(range_mean) else "N/A")
+        c3.metric("有效样本量", f"{n_count}")
+
+        st.markdown("---")
+        
+        # 详细统计参数
+        c4, c5, c6 = st.columns(3)
+        c4.write(f"**方差 (Variance):** {total_var:.4f}")
+        c5.write(f"**标准差 (Std Dev):** {total_std:.4f}")
+        c6.write(f"**过滤行数:** {len(raw_series) - n_count}")
+
+        # 置信区间卡片
+        if conf_level < 1.0:
+            st.info(f"📍 **{int(conf_level*100)}% 置信区间:** 真实均值约有 {int(conf_level*100)}% 的概率落在区间 `[{ci_lower:.4f}, {ci_upper:.4f}]` 内。")
+        else:
+            st.warning("📍 **100% 置信区间:** 理论上涵盖所有数值范围 (-∞, +∞)。")
+
+    with tab3:
+        st.subheader("📄 数据清洗预览")
+        st.write(f"以下是 **{column_name}** 列清洗后的前 100 条有效数字数据：")
+        st.dataframe(clean_data.head(100), use_container_width=True)
+
+elif uploaded_file:
+    st.error("❌ 无法进行分析。请确保选定的列中包含至少 2 个有效的数字。")
 
 else:
-    # 欢迎页提示
-    st.info("👈 请在左侧面板上传您的 Excel 或 CSV 数据文件以开始分析。")
+    # 初始引导页
+    st.info("💡 **快速开始：** 请在左侧侧边栏上传您的数据文件（CSV 或 Excel）。")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.image("https://img.icons8.com/clouds/200/000000/data-configuration.png")
+    with col_b:
+        st.markdown("""
+        ### 软件优势：
+        - **智能识别：** 自动剔除混合列中的文字、符号。
+        - **精准占比：** 柱状图上方实时标注百分比。
+        - **交互调节：** 动态修改组距和坐标显示范围。
+        - **置信区间：** 支持 60% 到 100% 的自由设定。
+        """)
