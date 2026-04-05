@@ -21,7 +21,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📊 ZT Pro 数据正态分析工作站")
+st.title("📊 正态分布分析")
 st.caption("专业的混合数据清洗、交互式绘图与深度统计推断工具")
 
 # --- 侧边栏：模块化配置 ---
