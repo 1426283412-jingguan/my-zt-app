@@ -6,7 +6,7 @@ from scipy import stats
 
 # 1. 网页基础美化配置
 st.set_page_config(
-    page_title="ZT Pro 数据分析工作站",
+    page_title="正态分布分析",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
