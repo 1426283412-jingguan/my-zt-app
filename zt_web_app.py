@@ -7,7 +7,7 @@ import io
 import datetime
 
 # --- 1. 页面级整体配置 ---
-st.set_page_config(page_title="数据分析工作站", layout="wide", page_icon="🧪")
+st.set_page_config(page_title="高级数据分析工作站 V4.0", layout="wide", page_icon="🧪")
 
 # 自定义 UI 样式
 st.markdown("""
@@ -54,7 +54,7 @@ current_fig = None
 # --- 3. 分析逻辑 ---
 
 if analysis_type == "正态分布分析":
-    st.title("📊 正态分布分析")
+    st.title("📊 正态分布局部深度分析")
     
     # 这里统一变量名为 target_col
     target_col = st.sidebar.selectbox("选择目标分析列", df_edited.columns)
