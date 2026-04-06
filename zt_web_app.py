@@ -5,101 +5,160 @@ import plotly.graph_objects as go
 from scipy import stats
 import io
 
-# --- 1. 页面配置与 CSS ---
-st.set_page_config(page_title="局部范围正态分析", layout="wide")
-st.markdown("<style>.main {background-color: #fcfcfc;}</style>", unsafe_allow_html=True)
+# --- 1. 页面配置 ---
+st.set_page_config(page_title="综合数据分析工作站", layout="wide", page_icon="📊")
 
-# --- 2. 侧边栏：数据导入 ---
+# 自定义 CSS 样式
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .plot-container { border-radius: 12px; overflow: hidden; background: white; padding: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. 侧边栏：数据管理 ---
 with st.sidebar:
-    st.header("📥 数据输入")
-    input_method = st.radio("方式", ["文件上传", "直接粘贴"])
+    st.title("🛠 控制中心")
+    analysis_mode = st.radio("选择分析模式", ["📈 正态分布分析", "📉 折线回归分析"])
     
-    raw_df = None
-    if input_method == "文件上传":
-        uploaded_file = st.file_uploader("拖拽文件", type=["csv", "xlsx"])
+    st.divider()
+    st.subheader("📥 数据录入")
+    input_method = st.toggle("使用粘贴/编辑模式", value=False)
+    
+    raw_df = pd.DataFrame()
+    if not input_method:
+        uploaded_file = st.file_uploader("上传 Excel/CSV", type=["csv", "xlsx"])
         if uploaded_file:
-            raw_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+            if uploaded_file.name.endswith('.csv'):
+                raw_df = pd.read_csv(uploaded_file)
+            else:
+                raw_df = pd.read_excel(uploaded_file)
     else:
-        data_text = st.text_area("粘贴 Excel 数据列", height=150)
-        if data_text:
-            raw_df = pd.read_csv(io.StringIO(data_text), header=None, names=["数据"])
+        st.caption("在下方编辑或粘贴数据 (默认第一行为表头)")
+        # 提供一个初始模板
+        init_data = "序号,数值\n1,10.2\n2,12.5\n3,11.8\n4,14.2\n5,13.9"
+        paste_text = st.text_area("数据粘贴区", value=init_data, height=150)
+        if paste_text:
+            raw_df = pd.read_csv(io.StringIO(paste_text))
 
-    if raw_df is not None:
-        target_col = st.selectbox("🎯 目标列", raw_df.columns.tolist())
-        # 预清洗
-        clean_series = pd.to_numeric(raw_df[target_col], errors='coerce').dropna()
-        
-        if len(clean_series) > 1:
-            st.markdown("---")
-            st.header("🔍 局部范围选择")
-            d_min, d_max = float(clean_series.min()), float(clean_series.max())
-            
-            # 用户选择显示的范围
-            analysis_range = st.slider("选择展示区间", d_min, d_max, (d_min, d_max))
-            
-            # 置信区间开关
-            show_ci = st.checkbox("显示均值置信区间", value=True)
-            conf_level = st.select_slider("置信水平", options=[90, 95, 99], value=95) / 100.0
-            
-            # 组距微调
-            bin_width = st.number_input("局部组距", value=(analysis_range[1]-analysis_range[0])/15 if analysis_range[1]!=analysis_range[0] else 1.0)
-        else:
-            st.stop()
-    else:
+    if raw_df.empty:
+        st.info("请先导入数据以开始")
         st.stop()
 
-# --- 3. 局部数据处理逻辑 ---
-# 仅提取选定范围内的数据
-subset = clean_series[(clean_series >= analysis_range[0]) & (clean_series <= analysis_range[1])]
-n_subset = len(subset)
-n_total = len(clean_series)
+    st.divider()
+    st.subheader("📝 数据在线编辑")
+    # 使用 Data Editor 允许用户直接修改数据
+    edited_df = st.data_editor(raw_df, num_rows="dynamic", use_container_width=True)
 
-# 计算统计量
-if n_subset > 0:
-    sub_mean = subset.mean()
-    sub_std = subset.std(ddof=1) if n_subset > 1 else 0
-    sub_range = subset.max() - subset.min()
+# --- 3. 分析逻辑 ---
+
+if analysis_mode == "📈 正态分布分析":
+    target_col = st.sidebar.selectbox("选择分析列", edited_df.columns)
+    data = pd.to_numeric(edited_df[target_col], errors='coerce').dropna()
     
-    # 置信区间 (基于全局数据计算更严谨，或基于局部计算，此处演示基于局部)
-    sem = stats.sem(subset) if n_subset > 1 else 0
-    ci_bounds = stats.t.interval(conf_level, df=n_subset-1, loc=sub_mean, scale=sem) if n_subset > 1 else (sub_mean, sub_mean)
-else:
-    st.error("当前选定范围内无有效数据，请调整滑块。")
-    st.stop()
+    if len(data) < 2:
+        st.warning("有效数据不足")
+        st.stop()
 
-# --- 4. 绘图与报告 ---
-tab1, tab2 = st.tabs(["🎯 局部分布图", "📋 范围统计分析"])
+    # 范围过滤
+    d_min, d_max = float(data.min()), float(data.max())
+    r_min, r_max = st.sidebar.slider("数值显示范围", d_min, d_max, (d_min, d_max))
+    subset = data[(data >= r_min) & (data <= r_max)]
+    
+    # 计算
+    mean, std = subset.mean(), subset.std()
+    conf_level = st.sidebar.select_slider("置信水平", [0.90, 0.95, 0.99], 0.95)
+    ci = stats.t.interval(conf_level, len(subset)-1, loc=mean, scale=stats.sem(subset))
 
-with tab1:
+    # 绘图
     fig = go.Figure()
-
-    # A. 局部直方图：仅使用 subset
-    # 重新计算 bins 以适配局部范围
-    local_bins = np.arange(analysis_range[0], analysis_range[1] + bin_width, bin_width)
-    counts, edges = np.histogram(subset, bins=local_bins)
+    bins = st.sidebar.number_input("组距", value=(r_max-r_min)/15, step=0.1)
+    hist_bins = np.arange(r_min, r_max + bins, bins)
+    counts, _ = np.histogram(subset, bins=hist_bins)
     
-    fig.add_trace(go.Bar(
-        x=edges[:-1] + bin_width/2, 
-        y=counts / n_subset, # 展示在局部样本中的占比
-        width=bin_width * 0.8,
-        name="局部频数占比",
-        marker_color='#2c3e50',
-        text=[f"{(c/n_subset)*100:.1f}%" for c in counts],
-        textposition='outside'
-    ))
-
-    # B. 局部正态曲线：仅在选定范围内绘制
-    x_line = np.linspace(analysis_range[0], analysis_range[1], 200)
-    y_line = stats.norm.pdf(x_line, sub_mean, sub_std) * bin_width if sub_std > 0 else np.zeros_like(x_line)
+    fig.add_trace(go.Bar(x=hist_bins[:-1]+bins/2, y=counts/len(subset), name="分布占比", marker_color='#34495e'))
+    x_curve = np.linspace(r_min, r_max, 100)
+    fig.add_trace(go.Scatter(x=x_curve, y=stats.norm.pdf(x_curve, mean, std)*bins, name="正态曲线", line=dict(color='red')))
     
-    fig.add_trace(go.Scatter(
-        x=x_line, y=y_line, 
-        mode='lines', 
-        name="局部理论正态", 
-        line=dict(color='#e74c3c', width=3)
-    ))
+    fig.update_layout(title="局部正态分布图", template="simple_white", xaxis_range=[r_min, r_max])
+    
+    # 展示指标
+    st.title("正态分布深度分析")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("局部样本量", len(subset))
+    c2.metric("极差 (Range)", f"{subset.max()-subset.min():.3f}")
+    c3.metric("均值", f"{mean:.3f}")
+    c4.metric("标准差", f"{std:.3f}")
+    
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(f"💡 {conf_level*100}% 置信区间: [{ci[0]:.4f}, {ci[1]:.4f}]")
 
-    # C. 置信区间阴影
-    if show_ci and n_subset > 1:
-        fig.add_vrect(
-            x0=max(ci_bounds[0], analysis_range
+else:  # --- 折线回归分析模式 ---
+    st.title("折线趋势与回归分析")
+    cols = edited_df.columns.tolist()
+    
+    col_x = st.sidebar.selectbox("选择 X 轴 (自变量)", cols, index=0)
+    col_y = st.sidebar.selectbox("选择 Y 轴 (因变量)", cols, index=min(1, len(cols)-1))
+    
+    # 转换为数字
+    plot_df = edited_df[[col_x, col_y]].apply(pd.to_numeric, errors='coerce').dropna()
+    
+    if len(plot_df) < 2:
+        st.error("数据点不足以进行回归分析")
+        st.stop()
+
+    # X/Y 范围控制
+    x_min_f, x_max_f = float(plot_df[col_x].min()), float(plot_df[col_x].max())
+    y_min_f, y_max_f = float(plot_df[col_y].min()), float(plot_df[col_y].max())
+    
+    sel_x = st.sidebar.slider("X 轴范围", x_min_f, x_max_f, (x_min_f, x_max_f))
+    sel_y = st.sidebar.slider("Y 轴范围", y_min_f, y_max_f, (y_min_f, y_max_f))
+    
+    filtered_df = plot_df[
+        (plot_df[col_x] >= sel_x[0]) & (plot_df[col_x] <= sel_x[1]) &
+        (plot_df[col_y] >= sel_y[0]) & (plot_df[col_y] <= sel_y[1])
+    ]
+
+    # 回归计算
+    slope, intercept, r_value, p_value, std_err = stats.linregress(filtered_df[col_x], filtered_df[col_y])
+    r_squared = r_value**2
+
+    # 绘图
+    fig = go.Figure()
+    # 原始折线
+    fig.add_trace(go.Scatter(x=filtered_df[col_x], y=filtered_df[col_y], mode='lines+markers', name="原始趋势", line=dict(color='#3498db')))
+    # 回归线
+    reg_x = np.array([sel_x[0], sel_x[1]])
+    reg_y = slope * reg_x + intercept
+    fig.add_trace(go.Scatter(x=reg_x, y=reg_y, mode='lines', name="回归拟合线", line=dict(color='red', dash='dash')))
+
+    fig.update_layout(
+        template="simple_white",
+        xaxis_title=col_x, yaxis_title=col_y,
+        xaxis_range=[sel_x[0], sel_x[1]], yaxis_range=[sel_y[0], sel_y[1]]
+    )
+
+    # 显示结果
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("判定系数 $R^2$", f"{r_squared:.4f}")
+    m2.metric("相关系数 $r$", f"{r_value:.4f}")
+    m3.metric("斜率 (Slope)", f"{slope:.4f}")
+    m4.metric("截距 (Intercept)", f"{intercept:.4f}")
+
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.success(f"📈 **拟合方程**: $y = {slope:.4f}x + {intercept:.4f}$")
+    with st.expander("什么是 $R^2$？"):
+        st.write("""
+        判定系数 $R^2$ 衡量了回归方程对观测值的拟合程度。
+        - $R^2 = 1$：完美拟合，所有点都在直线上。
+        - $R^2 = 0$：模型完全不能解释数据的变动。
+        - 通常 $R^2 > 0.8$ 被认为具有很强的相关性。
+        """)
+
+# --- 4. 数据表格导出 ---
+st.divider()
+st.subheader("📂 结果导出")
+csv = edited_df.to_csv(index=False).encode('utf-8')
+st.download_button("下载当前处理后的表格", csv, "processed_data.csv", "text/csv")
