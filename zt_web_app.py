@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 
 # 设置页面配置：宽屏模式
-st.set_page_config(page_title="多子表质量数据分析工具", layout="wide")
+st.set_page_config(page_title="LAR值分析工具", layout="wide")
 
 def main():
-    st.title("📊 质量数据分析终端 (支持多工作表)")
+    st.title("📊 LAR值分析工具")
     st.markdown("---")
 
     # 1. 侧边栏：文件上传
