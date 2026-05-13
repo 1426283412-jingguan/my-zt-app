@@ -49,7 +49,7 @@ def main():
     st.subheader(f"🔍 筛选条件: [{selected_file_name}] -> {selected_sheet}")
     
     # 根据你的截图，优化了筛选字段名
-    potential_filters = ["月份", "周期", "供应商", "来料日期", "物料编码", "类别"，"产品分类"]
+    potential_filters = ["月份", "周期", "供应商", "来料日期", "物料编码", "类别","产品分类"]
     actual_columns = df.columns.tolist()
     available_filters = [col for col in potential_filters if col in actual_columns]
     
