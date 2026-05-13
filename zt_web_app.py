@@ -1,125 +1,175 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
-# 1. 页面基本配置
-st.set_page_config(page_title="质量数据可视分析看板", layout="wide", initial_sidebar_state="expanded")
+# 1. 页面配置：使用专业深色/浅色融合主题
+st.set_page_config(page_title="SQE 质量数据决策看板", layout="wide")
 
-# 自定义 CSS 样式优化界面
+# 自定义 UI 样式
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .metric-card { background-color: #ffffff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .stPlotlyChart { background-color: #ffffff; border-radius: 8px; }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-def calculate_metrics(data, result_col="判定结果"):
-    """核心统计逻辑：计算 OK, NG 和 LAR"""
-    if data.empty:
-        return 0, 0, 0, 0
-    # 统一清洗结果列：转字符串、去空格、转大写
-    results = data[result_col].astype(str).str.strip().str.upper()
-    ok_count = (results == "OK").sum()
-    ng_count = (results == "NG").sum()
+def clean_data(df):
+    """强制转换关键列类型，防止科学计数法"""
+    str_cols = ['物料编码', '供应商', '物料号', '送检单号', '周期']
+    for col in str_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace('.0', '', regex=False)
+    
+    # 尝试转换日期
+    date_cols = ['来料日期', '入库日期', '日期']
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    return df
+
+def calculate_lar_metrics(data):
+    """计算核心质量指标"""
+    result_col = "判定结果"
+    if result_col not in data.columns:
+        return None
+    
+    # 清洗：去除空格、转大写，兼容“合格/不合格”
+    res = data[result_col].astype(str).str.strip().str.upper()
+    ok_mask = res.isin(['OK', '合格', 'PASS'])
+    ng_mask = res.isin(['NG', '不合格', 'FAIL', 'REJECT'])
+    
+    ok_count = ok_mask.sum()
+    ng_count = ng_mask.sum()
     total = ok_count + ng_count
     lar = (ok_count / total * 100) if total > 0 else 0
-    return ok_count, ng_count, total, lar
+    return {"OK": ok_count, "NG": ng_count, "Total": total, "LAR": lar}
 
 def main():
-    st.title("📈 质量数据智能看板 (LAR分析)")
-    
-    # --- 侧边栏：数据管理 ---
-    st.sidebar.header("📁 数据中心")
+    st.title("📊 SQE 供应链质量监控看板")
+    st.caption("支持多表切换、维度钻取及不良分布分析")
+
+    # --- 侧边栏：数据中心 ---
+    st.sidebar.header("📥 数据导入")
     uploaded_files = st.sidebar.file_uploader("上传 Excel 报表", type=["xlsx"], accept_multiple_files=True)
 
     if not uploaded_files:
-        st.info("👋 请在左侧上传 Excel 文件开始分析。")
+        st.info("💡 请在左侧上传 Excel 文件。建议包含列：判定结果、供应商、物料编码、来料日期、不良描述。")
         return
 
-    # 文件和子表选择
-    file_mapping = {f.name: f for f in uploaded_files}
-    selected_file_name = st.sidebar.selectbox("选择文件", list(file_mapping.keys()))
-    file_obj = file_mapping[selected_file_name]
-
+    # 文件与子表选择
+    file_map = {f.name: f for f in uploaded_files}
+    sel_file_name = st.sidebar.selectbox("选择文件", list(file_map.keys()))
+    
     try:
-        xl = pd.ExcelFile(file_obj)
-        selected_sheet = st.sidebar.selectbox("选择子表", xl.sheet_names)
-        # 读取数据，强制将物料编码读为字符串，防止坐标轴显示错误
-        df = pd.read_excel(file_obj, sheet_name=selected_sheet, dtype={'物料编码': str, '物料号': str})
+        xl = pd.ExcelFile(file_map[sel_file_name])
+        sel_sheet = st.sidebar.selectbox("选择子表", xl.sheet_names)
+        df = pd.read_excel(file_map[sel_file_name], sheet_name=sel_sheet)
         df.columns = [str(c).strip() for c in df.columns]
+        df = clean_data(df)
     except Exception as e:
-        st.error(f"读取失败: {e}")
+        st.error(f"解析失败: {e}")
         return
 
     # --- 动态过滤器 ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🎯 数据筛选")
+    st.sidebar.subheader("🎯 筛选中心")
     
-    # 预定义的关键维度
-    filter_cols = ["月份", "周期", "供应商", "物料编码", "产品分类", "来料日期"]
-    actual_cols = [c for c in filter_cols if c in df.columns]
+    filter_dims = ["供应商", "物料编码", "产品分类", "月份", "周期"]
+    actual_filters = [c for c in filter_dims if c in df.columns]
     
-    filtered_df = df.copy()
-    for col in actual_cols:
-        options = sorted(df[col].dropna().unique().astype(str))
-        selected = st.sidebar.multiselect(f"{col}", options)
-        if selected:
-            filtered_df = filtered_df[filtered_df[col].astype(str).isin(selected)]
+    f_df = df.copy()
+    for col in actual_filters:
+        opts = sorted(df[col].dropna().unique().astype(str))
+        sel = st.sidebar.multiselect(f"筛选 {col}", opts)
+        if sel:
+            f_df = f_df[f_df[col].astype(str).isin(sel)]
 
-    # --- 核心指标展示 ---
-    ok, ng, total, lar = calculate_metrics(filtered_df)
-    
-    st.subheader("📌 核心质量指标 (Total)")
+    # --- 1. 核心指标面板 ---
+    metrics = calculate_lar_metrics(f_df)
+    if not metrics:
+        st.error("未在表中找到 '判定结果' 列")
+        return
+
     c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("筛选后总批数", total)
-    with c2: st.metric("OK 数量", ok)
-    with c3: st.metric("NG 数量", ng, delta=ng, delta_color="inverse" if ng > 0 else "normal")
-    with c4: st.metric("总 LAR (合格率)", f"{lar:.2f}%")
+    c1.metric("总判定批数", metrics["Total"])
+    c2.metric("OK 批次", metrics["OK"])
+    c3.metric("NG 批次", metrics["NG"], delta=f"{metrics['NG']} 待处理", delta_color="inverse")
+    c4.metric("LAR (合格率)", f"{metrics['LAR']:.2f}%")
 
     st.markdown("---")
 
-    # --- 分维度深度分析 ---
-    if not filtered_df.empty:
-        st.subheader("📊 维度对比分析")
+    # --- 2. 深度分析区 ---
+    t1, t2, t3 = st.tabs(["📈 趋势与维度对比", "⚠️ 不良项分析", "📋 数据明细"])
+
+    with t1:
+        col_left, col_right = st.columns([1, 1])
         
-        # 让用户选择对比维度
-        group_dim = st.selectbox("选择分析维度 (按此项拆分展示 LAR):", actual_cols, index=0 if actual_cols else None)
+        # A. 维度对比 (柱状图)
+        with col_left:
+            group_col = st.selectbox("对比维度:", actual_filters if actual_filters else [df.columns[0]])
+            group_res = f_df.groupby(group_col).apply(lambda x: calculate_lar_metrics(x)["LAR"]).reset_index()
+            group_res.columns = [group_col, 'LAR(%)']
+            
+            fig_bar = px.bar(group_res, x=group_col, y='LAR(%)', color='LAR(%)',
+                            color_continuous_scale='RdYlGn', text_auto='.1f',
+                            title=f"各{group_col} 合格率对比")
+            fig_bar.update_layout(xaxis_type='category')
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # B. 趋势分析 (折线图)
+        with col_right:
+            date_col = next((c for c in ['来料日期', '入库日期', '日期'] if c in f_df.columns), None)
+            if date_col:
+                trend_df = f_df.copy()
+                trend_df['时间序列'] = trend_df[date_col].dt.strftime('%Y-%W') # 按周统计
+                trend_res = trend_df.groupby('时间序列').apply(lambda x: calculate_lar_metrics(x)["LAR"]).reset_index()
+                trend_res.columns = ['周次', 'LAR(%)']
+                
+                fig_line = px.line(trend_res, x='周次', y='LAR(%)', markers=True,
+                                  title="品质稳定性趋势 (按周计算)", line_shape="spline")
+                st.plotly_chart(fig_line, use_container_width=True)
+            else:
+                st.warning("表中缺少日期列，无法生成趋势图")
+
+    with t2:
+        # 不良分布 (Pareto Chart)
+        defect_col = next((c for c in ['不良描述', '不良原因', '缺陷'] if c in f_df.columns), None)
+        if defect_col:
+            st.subheader("🌋 不良项分布 (Pareto)")
+            defect_counts = f_df[defect_col].value_counts().reset_index()
+            defect_counts.columns = ['缺陷描述', '频次']
+            
+            fig_pie = px.pie(defect_counts, names='缺陷描述', values='频次', hole=0.4,
+                            title="不良构成比例")
+            st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("未检测到“不良描述”列，无法进行缺陷分析")
+
+    with t3:
+        # 统计表格显示 (修复 Styler 报错)
+        st.subheader("📊 统计摘要")
+        summary_table = f_df.groupby(group_col).apply(
+            lambda x: pd.Series(calculate_metrics_full(x))
+        ).reset_index()
         
-        if group_dim:
-            # 分组计算每项的 LAR
-            report = filtered_df.groupby(group_dim).apply(
-                lambda x: pd.Series(calculate_metrics(x))
-            ).reset_index()
-            report.columns = [group_dim, 'OK', 'NG', '总数', 'LAR(%)']
-            report['LAR(%)'] = report['LAR(%)'].round(2)
+        # 使用 st.dataframe 的内置列着色，更稳定
+        st.dataframe(
+            summary_table.style.highlight_min(subset=['LAR(%)'], color='#ffcccc')
+                               .highlight_max(subset=['LAR(%)'], color='#ccffcc'),
+            use_container_width=True
+        )
+        
+        st.markdown("---")
+        st.subheader("📄 原始明细数据导出")
+        st.dataframe(f_df, use_container_width=True)
+        
+        csv = f_df.to_csv(index=False).encode('utf_8_sig')
+        st.download_button("📥 导出筛选后的报表", data=csv, file_name="Quality_Report.csv")
 
-            tab1, tab2, tab3 = st.tabs(["📉 可视化对比图", "📋 统计明细表", "🔍 原始数据"])
-
-            with tab1:
-                # 绘制交互式柱状图
-                fig = px.bar(
-                    report, x=group_dim, y='LAR(%)', 
-                    text='LAR(%)', color='LAR(%)',
-                    color_continuous_scale='RdYlGn', # 红黄绿渐变
-                    hover_data=['OK', 'NG', '总数'],
-                    title=f"各{group_dim} 的 LAR 合格率对比"
-                )
-                # 强制 X 轴为标签型，解决物料编码数字显示问题
-                fig.update_layout(xaxis_type='category') 
-                st.plotly_chart(fig, use_container_width=True)
-
-            with tab2:
-                # 修正：使用 st.dataframe 代替 st.table 以获得更好的样式兼容性
-                st.write(f"**各 {group_dim} 统计详情**")
-                styled_report = report.style.background_gradient(subset=['LAR(%)'], cmap='RdYlGn', vmin=90, vmax=100)
-                st.dataframe(styled_report, use_container_width=True)
-
-            with tab3:
-                st.dataframe(filtered_df, use_container_width=True)
-                csv = filtered_df.to_csv(index=False).encode('utf_8_sig')
-                st.download_button("📥 导出当前筛选明细", data=csv, file_name="quality_analysis.csv")
-    else:
-        st.warning("⚠️ 当前筛选条件下无数据，请重新调整筛选器。")
+def calculate_metrics_full(data):
+    m = calculate_lar_metrics(data)
+    return {'OK数量': m['OK'], 'NG数量': m['NG'], '总批数': m['Total'], 'LAR(%)': round(m['LAR'], 2)}
 
 if __name__ == "__main__":
     main()
