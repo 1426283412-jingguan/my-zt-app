@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # 1. 页面配置：使用专业深色/浅色融合主题
-st.set_page_config(page_title="SQE 质量数据决策看板", layout="wide")
+st.set_page_config(page_title="LAR值看板", layout="wide")
 
 # 自定义 UI 样式
 st.markdown("""
@@ -16,7 +16,7 @@ st.markdown("""
 
 def clean_data(df):
     """强制转换关键列类型，防止科学计数法"""
-    str_cols = ['物料编码', '供应商', '物料号', '送检单号', '周期']
+    str_cols = ['物料编码', '供应商', '物料号', '送检单号', '类别','周期']
     for col in str_cols:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace('.0', '', regex=False)
@@ -46,7 +46,7 @@ def calculate_lar_metrics(data):
     return {"OK": ok_count, "NG": ng_count, "Total": total, "LAR": lar}
 
 def main():
-    st.title("📊 SQE 供应链质量监控看板")
+    st.title("📊 LAR值看板")
     st.caption("支持多表切换、维度钻取及不良分布分析")
 
     # --- 侧边栏：数据中心 ---
@@ -75,7 +75,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 筛选中心")
     
-    filter_dims = ["供应商", "物料编码", "产品分类", "月份", "周期"]
+    filter_dims = ["供应商", "物料编码", "产品分类", "月份", "类别", "周期"]
     actual_filters = [c for c in filter_dims if c in df.columns]
     
     f_df = df.copy()
