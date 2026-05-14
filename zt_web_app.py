@@ -75,7 +75,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 筛选中心")
     
-    filter_dims = ["供应商", "物料编码", "产品分类", "月", "类别", "周期"]
+    filter_dims = ["供应商", "物料编码", "产品分类", "月", "类别", "产品状态区分", "周期"]
     actual_filters = [c for c in filter_dims if c in df.columns]
     
     f_df = df.copy()
